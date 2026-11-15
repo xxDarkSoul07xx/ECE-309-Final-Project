@@ -49,13 +49,16 @@ public:
     //      pointer to its value (valid until the next put/erase/clear).
     // Miss: counts a miss and returns nullptr.
     const Value* get(const Key& key) {
-        // TODO
-        // Clue: look keys up with  auto it = map_.find(key);  and compare
-        // with map_.end(). Do NOT use map_[key] to look up: on a miss it
-        // INSERTS the key (with a nullptr node), size() grows, and a later
-        // put() crashes far away from the real bug.
-        (void)key;
-        return nullptr;
+        auto it = map_.find(key);
+        if (it == map_.end()) {
+            stats_.misses++;
+            return nullptr;
+        }
+        // move to front since it was just used
+        unlink(it->second);
+        push_front(it->second);
+        stats_.hits++;
+        return &it->second->value;
     }
 
     // Key present: replaces its value and marks it most recently used (no
@@ -64,39 +67,58 @@ public:
     //   (counting one eviction), then inserts the new entry as most recently
     //   used. With capacity 0, does nothing.
     void put(const Key& key, Value value) {
-        // TODO
-        // Clue (eviction): victim = tail_; unlink it; erase victim->key from
-        // the map; THEN delete victim. Reading victim->key after delete is a
-        // heap-use-after-free (ASan may show it as a SEGV inside hashtable
-        // code: look for the first stack frame in lru_cache.h).
-        // Clue: create nodes with  new Node{key, std::move(value), nullptr, nullptr}.
-        (void)key;
-        (void)value;
+        if (capacity_ == 0) return;
+
+        auto it = map_.find(key);
+        if (it != map_.end()) {
+            // key already here so just update value and move to front
+            it->second->value = std::move(value);
+            unlink(it->second);
+            push_front(it->second);
+            return;
+        }
+
+        // evict LRU if full
+        if (map_.size() == capacity_) {
+            Node* victim = tail_;
+            unlink(victim);
+            map_.erase(victim->key);
+            delete victim;
+            stats_.evictions++;
+        }
+
+        // insert new node at front
+        Node* n = new Node{key, std::move(value), nullptr, nullptr};
+        push_front(n);
+        map_[key] = n;
     }
 
     // True if the key is cached. Does NOT change recency or stats.
     bool contains(const Key& key) const {
-        // TODO
-        // Clue: this function is const, so map_[key] does not even compile
-        // ("discards qualifiers"). Use map_.find(key) != map_.end() or
-        // map_.count(key).
-        (void)key;
-        return false;
+        return map_.find(key) != map_.end();
     }
 
     // Removes the key if present (not an eviction). Returns whether it was.
     bool erase(const Key& key) {
-        // TODO
-        (void)key;
-        return false;
+        auto it = map_.find(key);
+        if (it == map_.end()) return false;
+        unlink(it->second);
+        delete it->second;
+        map_.erase(it);
+        return true;
     }
 
     // Removes every entry. Stats are kept.
     void clear() {
-        // TODO: delete every node, empty the map, reset head_/tail_.
-        // Clue: save n->next in a local BEFORE  delete n;  a loop like
-        //   for (Node* n = head_; n; n = n->next) delete n;
-        // reads n->next from freed memory.
+        Node* n = head_;
+        while (n) {
+            Node* next = n->next;
+            delete n;
+            n = next;
+        }
+        head_ = nullptr;
+        tail_ = nullptr;
+        map_.clear();
     }
 
     std::size_t size() const noexcept { return map_.size(); }
@@ -119,13 +141,24 @@ private:
         Node* next;
     };
 
-    // ===== YOUR HELPERS AND MEMBERS =====
-    // Suggested helpers: unlink(Node*), push_front(Node*), move_to_front(Node*).
-    // Clue for unlink(n): four cases. If n has a prev, prev->next skips n,
-    // otherwise n was head_ and head_ moves to n->next. Likewise, if n has
-    // a next, next->prev skips n, otherwise n was tail_ and tail_ moves to
-    // n->prev. Unlinking the only node leaves head_ == tail_ == nullptr.
-    // Spec Appendix B lists every pointer write.
+    // remove node from the list without deleting it
+    void unlink(Node* n) {
+        if (n->prev) n->prev->next = n->next;
+        else head_ = n->next;
+        if (n->next) n->next->prev = n->prev;
+        else tail_ = n->prev;
+        n->prev = nullptr;
+        n->next = nullptr;
+    }
+
+    // stick node at the front of the list
+    void push_front(Node* n) {
+        n->prev = nullptr;
+        n->next = head_;
+        if (head_) head_->prev = n;
+        else tail_ = n;
+        head_ = n;
+    }
 
     std::unordered_map<Key, Node*, Hash> map_;
     Node*       head_ = nullptr;
