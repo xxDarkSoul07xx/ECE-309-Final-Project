@@ -69,13 +69,5 @@ private:
     // A suggested start (change it if you like):
     std::unordered_map<std::string, std::vector<std::string>> requires_;     // node -> requirements
     std::unordered_map<std::string, std::vector<std::string>> required_by_;  // target -> nodes needing it
-    // Clue: if you keep required_by_ for the BFS, add_edge must fill it too.
-    // Clue: order_from() and the others are const, so requires_[name] does
-    // not compile there ("discards qualifiers") - and it would insert a new
-    // key anyway. Use requires_.find(name) and compare with requires_.end().
-    // Clue: a recursive DFS helper needs a declaration here, e.g.
-    //   bool dfs(const std::string& node, std::unordered_map<std::string, int>& color,
-    //            std::vector<std::string>& path, std::vector<std::string>* out,
-    //            std::string* error) const;
-    // (or write it as a free function in an anonymous namespace in the .cpp).
+    bool dfs(const std::string& node, std::unordered_map<std::string, int>& color, std::vector<std::string>& path, std::vector<std::string>* out, std::string* error) const;
 };
